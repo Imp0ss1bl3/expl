@@ -1,0 +1,79 @@
+name: Deploy Application
+
+on:
+  push:
+    branches:
+      - main
+      - "feature-*"
+
+jobs:
+  install_dependencies:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: 14
+
+      - name: Install dependencies
+        run: yarn install
+
+      - name: Build project
+        run: |
+          yarn build
+          mv build build_${{ env.env }}
+
+      - name: Cache node_modules
+        uses: actions/cache@v3
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-yarn-${{ hashFiles('**/yarn.lock') }}
+
+  deploy_staging:
+    needs: install_dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Staging
+        env:
+          DOCKER_HTML_PATH: "/www"
+          CI_COMMIT_SHA: ${{ github.sha }}
+          CI_COMMIT_BRANCH: ${{ github.ref_name }}
+        run: |
+          cp -r build_staging $DOCKER_HTML_PATH/test-app/staging_${{ github.sha }}
+          cp -Pv $DOCKER_HTML_PATH/staging/${{ github.ref_name }} $DOCKER_HTML_PATH/test-app/staging_${{ github.sha }}/prev-version || true
+
+  deploy_prod:
+    needs: install_dependencies
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy to Production
+        env:
+          DOCKER_HTML_PATH: "/www"
+          CI_COMMIT_SHA: ${{ github.sha }}
+        run: |
+          cp -r build_prod $DOCKER_HTML_PATH/test-app/prod_${{ github.sha }}
+          cp -Pv $DOCKER_HTML_PATH/html $DOCKER_HTML_PATH/test-app/prod_${{ github.sha }}/prev-version || true
+
+  activate_staging:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Activate Staging
+        env:
+          DOCKER_HTML_PATH: "/www"
+          CI_COMMIT_BRANCH: ${{ github.ref_name }}
+        run: |
+          ln -fsnv /var/www/test-app/staging_${{ github.sha }} $DOCKER_HTML_PATH/staging/${{ github.ref_name }}
+
+  revert:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Revert to Previous Version
+        env:
+          DOCKER_HTML_PATH: "/www"
+        run: |
+          cp -Pv --remove-destination $DOCKER_HTML_PATH/test-app/${{ github.sha }}/prev-version $DOCKER_HTML_PATH/html
