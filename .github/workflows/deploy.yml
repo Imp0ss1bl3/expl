@@ -1,5 +1,4 @@
 name: Deploy Application
-runs-on: self-hosted
 on:
   push:
     branches:
@@ -8,7 +7,7 @@ on:
 
 jobs:
   install_dependencies:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -34,7 +33,7 @@ jobs:
 
   deploy_staging:
     needs: install_dependencies
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - name: Deploy to Staging
         env:
@@ -47,7 +46,7 @@ jobs:
 
   deploy_prod:
     needs: install_dependencies
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - name: Deploy to Production
         env:
@@ -58,7 +57,7 @@ jobs:
           cp -Pv $DOCKER_HTML_PATH/html $DOCKER_HTML_PATH/test-app/prod_${{ github.sha }}/prev-version || true
 
   activate_staging:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     if: github.ref == 'refs/heads/main'
     steps:
       - name: Activate Staging
@@ -69,7 +68,7 @@ jobs:
           ln -fsnv /var/www/test-app/staging_${{ github.sha }} $DOCKER_HTML_PATH/staging/${{ github.ref_name }}
 
   revert:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     if: github.event_name == 'workflow_dispatch'
     steps:
       - name: Revert to Previous Version
