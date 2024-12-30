@@ -1,4 +1,5 @@
 name: Deploy Application
+
 on:
   push:
     branches:
@@ -6,73 +7,59 @@ on:
       - "feature-*"
 
 jobs:
-  install_dependencies:
+  build_and_push_docker:
     runs-on: self-hosted
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v3
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v2
         with:
-          node-version: 14
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
 
-      - name: Install dependencies
-        run: yarn install
-
-      - name: Build project
+      - name: Build and push Docker image
         run: |
-          yarn build
-          mv build build_${{ env.env }}
-
-      - name: Cache node_modules
-        uses: actions/cache@v3
-        with:
-          path: node_modules
-          key: ${{ runner.os }}-yarn-${{ hashFiles('**/yarn.lock') }}
+          docker build -t ${{ secrets.DOCKER_USERNAME }}/my-app:${{ github.sha }} .
+          docker push ${{ secrets.DOCKER_USERNAME }}/my-app:${{ github.sha }}
 
   deploy_staging:
-    needs: install_dependencies
+    needs: build_and_push_docker
     runs-on: self-hosted
     steps:
-      - name: Deploy to Staging
-        env:
-          DOCKER_HTML_PATH: "/www"
-          CI_COMMIT_SHA: ${{ github.sha }}
-          CI_COMMIT_BRANCH: ${{ github.ref_name }}
+      - name: Pull and run Docker container for staging
         run: |
-          cp -r build_staging $DOCKER_HTML_PATH/test-app/staging_${{ github.sha }}
-          cp -Pv $DOCKER_HTML_PATH/staging/${{ github.ref_name }} $DOCKER_HTML_PATH/test-app/staging_${{ github.sha }}/prev-version || true
+          docker pull ${{ secrets.DOCKER_USERNAME }}/my-app:${{ github.sha }}
+          docker stop staging || true
+          docker rm staging || true
+          docker run -d --name staging \
+            -e BRANCH=${{ github.ref_name }} \
+            -p 8080:80 \
+            ${{ secrets.DOCKER_USERNAME }}/my-app:${{ github.sha }}
 
   deploy_prod:
-    needs: install_dependencies
-    runs-on: self-hosted
-    steps:
-      - name: Deploy to Production
-        env:
-          DOCKER_HTML_PATH: "/www"
-          CI_COMMIT_SHA: ${{ github.sha }}
-        run: |
-          cp -r build_prod $DOCKER_HTML_PATH/test-app/prod_${{ github.sha }}
-          cp -Pv $DOCKER_HTML_PATH/html $DOCKER_HTML_PATH/test-app/prod_${{ github.sha }}/prev-version || true
-
-  activate_staging:
-    runs-on: self-hosted
+    needs: build_and_push_docker
     if: github.ref == 'refs/heads/main'
+    runs-on: self-hosted
     steps:
-      - name: Activate Staging
-        env:
-          DOCKER_HTML_PATH: "/www"
-          CI_COMMIT_BRANCH: ${{ github.ref_name }}
+      - name: Pull and run Docker container for production
         run: |
-          ln -fsnv /var/www/test-app/staging_${{ github.sha }} $DOCKER_HTML_PATH/staging/${{ github.ref_name }}
+          docker pull ${{ secrets.DOCKER_USERNAME }}/my-app:${{ github.sha }}
+          docker stop production || true
+          docker rm production || true
+          docker run -d --name production \
+            -p 80:80 \
+            ${{ secrets.DOCKER_USERNAME }}/my-app:${{ github.sha }}
 
   revert:
     runs-on: self-hosted
     if: github.event_name == 'workflow_dispatch'
     steps:
       - name: Revert to Previous Version
-        env:
-          DOCKER_HTML_PATH: "/www"
         run: |
-          cp -Pv --remove-destination $DOCKER_HTML_PATH/test-app/${{ github.sha }}/prev-version $DOCKER_HTML_PATH/html
+          docker stop production || true
+          docker rm production || true
+          docker run -d --name production \
+            -p 80:80 \
+            ${{ secrets.DOCKER_USERNAME }}/my-app:previous-version
